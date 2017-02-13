@@ -124,99 +124,39 @@ on boot
 ##############################################################
 # Source: device/intel/mixins/groups/graphics/ufo_gen8/init.rc
 ##############################################################
-# for hardware accelerated graphics
-service ufo-init /system/bin/sh /system/etc/init.ufo.sh
-    class core
-    oneshot
-
-#Enable graphic debug information
-service debug_i915 /system/bin/sh /system/etc/ftrace_gpu_request_scheduler.sh
-	class main
-	disabled
-	oneshot
-
-service msync /system/bin/msync
+service msync /system/vendor/bin/msync
     class main
-    seclabel u:r:msync:s0
+#    seclabel u:r:msync:s0
 
-service coreu /system/bin/coreu
+service coreu /system/vendor/bin/coreu
     class main
 
 on post-fs-data
     mkdir /data/system 0770 system system
-    restart ufo-init
+    mkdir /data/coreu 0770 media root
+
+on boot
+   #Give permission to system to use i915_videostatus sysfs interface
+    chown system system /sys/class/drm/card0/power/i915_videostatus
+
+ on property:persist.gen_gfxd.enable=1
+     start gfxd
+ 
+ on property:persist.gen_gfxd.enable=0
+     stop gfxd
+ 
+ service gfxd /system/vendor/bin/gfxd
+     class main
+     user root
+     group graphics
+
 ##############################################################
 # Source: device/intel/mixins/groups/storage/sdcard-mmcblk1-4xUSB-sda-emulated/init.rc
 ##############################################################
 on init
-    # See storage config details at http://source.android.com/tech/storage/
-    mkdir /mnt/shell/emulated 0700 shell shell
-    mkdir /storage/emulated 0555 root root
-
-    # make mount point for external sdcard
-    mkdir /mnt/media_rw/sdcard1 0700 media_rw media_rw
-    mkdir /storage/sdcard1 0700 root root
-
-    # make mount point for usb thumb drives
-    mkdir /mnt/media_rw/usbdisk 0700 media_rw media_rw
-    mkdir /storage/usbdisk 0700 root root
-
-    # make mount point for usb thumb drives
-    mkdir /mnt/media_rw/usbdisk2 0700 media_rw media_rw
-    mkdir /storage/usbdisk2 0700 root root
-
-    # make mount point for usb thumb drives
-    mkdir /mnt/media_rw/usbdisk3 0700 media_rw media_rw
-    mkdir /storage/usbdisk3 0700 root root
-
-    # make mount point for usb thumb drives
-    mkdir /mnt/media_rw/usbdisk4 0700 media_rw media_rw
-    mkdir /storage/usbdisk4 0700 root root
-
-    export EXTERNAL_STORAGE /storage/emulated/legacy
-    export EMULATED_STORAGE_SOURCE /mnt/shell/emulated
-    export EMULATED_STORAGE_TARGET /storage/emulated
-
-    # Support legacy paths
-    symlink /storage/emulated/legacy /sdcard
-    symlink /storage/emulated/legacy /mnt/sdcard
-    symlink /storage/emulated/legacy /storage/sdcard0
-    symlink /mnt/shell/emulated/0 /storage/emulated/legacy
-
-on fs
-    setprop ro.crypto.fuse_sdcard true
-
-# virtual sdcard daemon running as media_rw (1023)
-service sdcard /system/bin/sdcard -u 1023 -g 1023 -l /data/media /mnt/shell/emulated
-    class late_start
-
-#external sdcard
-service fuse_sdcard1 /system/bin/sdcard -u 1023 -g 1023 -w 1023 -d /mnt/media_rw/sdcard1 /storage/sdcard1
-    class late_start
-    disabled
-
-#external storage
-service fuse_usbdisk /system/bin/sdcard -u 1023 -g 1023 -w 1023 -d /mnt/media_rw/usbdisk /storage/usbdisk
-    class late_start
-    disabled
-
-#external storage
-service fuse_usbdisk2 /system/bin/sdcard -u 1023 -g 1023 -w 1023 -d /mnt/media_rw/usbdisk2 /storage/usbdisk2
-    class late_start
-    disabled
-
-#external storage
-service fuse_usbdisk3 /system/bin/sdcard -u 1023 -g 1023 -w 1023 -d /mnt/media_rw/usbdisk3 /storage/usbdisk3
-    class late_start
-    disabled
-
-#external storage
-service fuse_usbdisk4 /system/bin/sdcard -u 1023 -g 1023 -w 1023 -d /mnt/media_rw/usbdisk4 /storage/usbdisk4
-    class late_start
-    disabled
-
-on post-fs-data
-    restorecon /data/media/0
+# Support legacy paths
+symlink /sdcard /mnt/sdcard
+symlink /sdcard /storage/sdcard0
 ##############################################################
 # Source: device/intel/mixins/groups/ethernet/dhcp/init.rc
 ##############################################################
@@ -389,6 +329,12 @@ on boot
     setprop widi.abr.enable true
     setprop widi.setsocketsize.enable false
     setprop widi.socketpriority.enable false
+
+
+ on post-fs-data
+     mkdir /data/misc/dnsmasq 0755 root root
+     mkdir /data/misc/dnsmasq/dalvik-cache 0755 root root
+     restorecon_recursive /data/misc/dnsmasq
 ##############################################################
 # Source: device/intel/mixins/groups/audio/cht-rt5672/init.rc
 ##############################################################
@@ -695,7 +641,16 @@ import /init.diag.rc
 on boot
    write /sys/devices/pci0000:00/0000:00:1a.0/power/control auto
 
+on init
+   symlink /dev/mei0 /dev/mei
 
+on charger
+   write /sys/devices/pci0000:00/0000:00:1a.0/power/control auto
+
+
+##############################################################
+# Source: device/intel/mixins/groups/libiha/true/init.rc
+##############################################################
 service otpserver /system/bin/otpserver
     class main
     user drmrpc
@@ -717,14 +672,16 @@ service keymaster_meid /system/bin/keymaster_meid
 # Note that this service must start as root to set up a mem-mapped region
 # and once that is set up it will drop all unnecessary capabilities and
 # will not show up as a root process in the steady state.
-on post-fs-data
-    mkdir /data/hdcp 700 media media
 
-service hdcpd /system/bin/hdcpd
+service hdcpd /system/vendor/bin/hdcpd
     class main
     user root
     group graphics drmrpc
-    seclabel u:r:hdcpd:s0
+
+# mkdir hdcp data folder here, non system service don't have permission
+# to write in /data/
+on post-fs-data
+    mkdir /data/hdcp 0770 media media
 
 ##############################################################
 # Source: device/intel/mixins/groups/power/true/init.rc
@@ -809,12 +766,9 @@ on late-init
 ##############################################################
 # Source: device/intel/mixins/groups/intel_prop/true/init.rc
 ##############################################################
-on boot
-    start intel_prop
-
-service intel_prop /sbin/intel_prop
+service intel_prop /system/vendor/bin/intel_prop
+    class core
     oneshot
-    seclabel u:r:intel_prop:s0
 ##############################################################
 # Source: device/intel/mixins/groups/factory-partition/enabled/init.rc
 ##############################################################
@@ -857,6 +811,14 @@ on early-init
     # create stack traces, required with newer kernels
     mount debugfs debugfs /sys/kernel/debug
     chmod 0755 /sys/kernel/debug
+
+##############################################################
+# Source: device/intel/mixins/groups/vendor_fw_load/default/init.rc
+##############################################################
+ on init
+     #create /lib folder if it does not exist
+     mkdir /lib
+     symlink /system/vendor/firmware /lib/firmware
 
 # ------------------ END MIX-IN DEFINITIONS ------------------
 
@@ -908,4 +870,7 @@ service smeloop /system/bin/smeloop
     user root
     group root
     oneshot
+
+on init
+    export LD_SHIM_LIBS /system/lib/libparameter.so|libshim_audio.so:/system/lib/libpower-subsystem.so|libshim_audio.so:/system/lib/libremoteparameter-subsystem.so|libshim_audio.so:/system/lib/libtinyalsa_custom-subsystem.so|libshim_audio.so:/system/lib/hw/camera.gmin.so|libshim_camera.so:/system/lib/hw/sensors.gmin.so|libshim_sensors.so
 
